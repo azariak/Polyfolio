@@ -1,0 +1,805 @@
+/* ============================================================
+   POLYFOLIO — app.js
+   Prediction Market Portfolio Forensics
+   Pure vanilla JS, no build, no backend
+   ============================================================ */
+
+(function () {
+  'use strict';
+
+  /* ---------- CONSTANTS ---------- */
+  const API_BASE = 'https://data-api.polymarket.com';
+  const ADDR_RE = /^0x[a-fA-F0-9]{40}$/;
+
+  /*
+   * Per-endpoint pagination limits (from API docs + empirical testing):
+   *   /positions         — accepts large limits (tested 500 → returned 305)
+   *   /closed-positions  — hard cap at 50 per page (silently truncates)
+   *   /trades            — max 10,000 per page, offset max 10,000
+   *   /activity          — max 500 per page, offset max 10,000
+   */
+  const ENDPOINT_CONFIG = {
+    positions:       { limit: 500,   maxOffset: 100000 },
+    closedPositions: { limit: 50,    maxOffset: 100000 },
+    trades:          { limit: 10000, maxOffset: 10000  },
+    activity:        { limit: 500,   maxOffset: 10000  },
+  };
+
+  const CHART_COLORS = [
+    '#C0503A', '#2D8A54', '#7B6250', '#4A7A8A', '#A06830',
+    '#6A8A5B', '#8B5E6E', '#5A7060', '#B07848', '#5B7E90',
+    '#9A7040', '#507A6A', '#8A6878', '#6A9070', '#C47050',
+    '#3A7A5A', '#7A6A58', '#5890A0', '#A88050', '#688068',
+  ];
+
+  /* ---------- DOM REFS ---------- */
+  const $ = (sel) => document.querySelector(sel);
+  const entryScreen = $('#entry-screen');
+  const loadingScreen = $('#loading-screen');
+  const dashboard = $('#dashboard');
+  const addressInput = $('#address-input');
+  const loadBtn = $('#load-btn');
+  const entryError = $('#entry-error');
+  const loadingAddr = $('#loading-address');
+  const dashAddr = $('#dash-address');
+  const backBtn = $('#back-btn');
+
+  /* ---------- STATE ---------- */
+  let chartInstances = [];
+  let currentSortKey = 'currentValue';
+  let currentSortDir = 'desc';
+  let activePositions = [];
+  let closedSortKey = 'timestamp';
+  let closedSortDir = 'desc';
+  let closedPositionsData = [];
+
+  /* ---------- THEME ---------- */
+  function getTheme() {
+    return document.documentElement.getAttribute('data-theme') || 'light';
+  }
+
+  function setTheme(theme) {
+    if (theme === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    try { localStorage.setItem('polyfolio-theme', theme); } catch (_) {}
+  }
+
+  function toggleTheme() {
+    setTheme(getTheme() === 'light' ? 'dark' : 'light');
+    if (!dashboard.classList.contains('hidden') && lastData) {
+      renderAllCharts(lastData);
+    }
+  }
+
+  /* Restore saved theme (default: light) */
+  (function initTheme() {
+    try {
+      const saved = localStorage.getItem('polyfolio-theme');
+      if (saved) setTheme(saved);
+    } catch (_) {}
+  })();
+
+  /* Wire both toggle buttons */
+  $('#entry-theme-btn').addEventListener('click', toggleTheme);
+  $('#dash-theme-btn').addEventListener('click', toggleTheme);
+
+  /* ---------- HELPERS ---------- */
+  function getCSSVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function formatUSD(n) {
+    const num = Number(n);
+    if (isNaN(num)) return '—';
+    const abs = Math.abs(num);
+    if (abs >= 1e6) return (num < 0 ? '-' : '') + '$' + (abs / 1e6).toFixed(2) + 'M';
+    if (abs >= 1e3) return (num < 0 ? '-' : '') + '$' + (abs / 1e3).toFixed(2) + 'K';
+    return '$' + num.toFixed(2);
+  }
+
+  function formatPct(n) {
+    const num = Number(n);
+    if (isNaN(num)) return '—';
+    return (num >= 0 ? '+' : '') + (num * 100).toFixed(1) + '%';
+  }
+
+  function formatDate(d) {
+    if (!d) return '—';
+    const dt = new Date(d);
+    if (isNaN(dt)) return '—';
+    return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function pnlClass(n) {
+    const num = Number(n);
+    if (num > 0) return 'pnl-positive';
+    if (num < 0) return 'pnl-negative';
+    return '';
+  }
+
+  function metricClass(n) {
+    const num = Number(n);
+    if (num > 0) return 'positive';
+    if (num < 0) return 'negative';
+    return '';
+  }
+
+  function truncAddr(addr) {
+    return addr.slice(0, 8) + '...' + addr.slice(-6);
+  }
+
+  function escapeHTML(str) {
+    const el = document.createElement('span');
+    el.textContent = str || '';
+    return el.innerHTML;
+  }
+
+  /* ---------- API WITH PAGINATION ---------- */
+  async function fetchJSON(path) {
+    const res = await fetch(API_BASE + path);
+    if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+    return res.json();
+  }
+
+  /**
+   * Unwrap API response into an array regardless of shape.
+   */
+  function unwrapArray(data) {
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.data)) return data.data;
+    if (data && Array.isArray(data.results)) return data.results;
+    if (data && Array.isArray(data.positions)) return data.positions;
+    return null;
+  }
+
+  /**
+   * Paginate through an endpoint using its documented limits.
+   *
+   * @param {string} basePath  — e.g. '/closed-positions?'
+   * @param {string} address   — 0x-prefixed wallet
+   * @param {object} config    — { limit, maxOffset } from ENDPOINT_CONFIG
+   */
+  async function fetchAllPages(basePath, address, config) {
+    const { limit, maxOffset } = config;
+    const sep = basePath.includes('?') ? '&' : '?';
+    let all = [];
+    let offset = 0;
+
+    while (offset <= maxOffset) {
+      const path = `${basePath}user=${address}${sep}limit=${limit}&offset=${offset}`;
+      let raw;
+      try {
+        raw = await fetchJSON(path);
+      } catch (_) {
+        break;
+      }
+
+      const batch = unwrapArray(raw);
+      if (!batch) break;
+
+      all = all.concat(batch);
+
+      /* Stop if this page returned fewer than the limit — no more data */
+      if (batch.length < limit) break;
+
+      offset += limit;
+    }
+
+    return all;
+  }
+
+  let lastData = null;
+
+  async function loadPortfolio(address) {
+    const [positions, closedPositions, trades] = await Promise.all([
+      fetchAllPages('/positions?', address, ENDPOINT_CONFIG.positions).catch(() => []),
+      fetchAllPages('/closed-positions?', address, ENDPOINT_CONFIG.closedPositions).catch(() => []),
+      fetchAllPages('/trades?', address, ENDPOINT_CONFIG.trades).catch(() => []),
+    ]);
+
+    let quickValue = null;
+    try {
+      quickValue = await fetchJSON(`/value?user=${address}`);
+    } catch (_) {}
+
+    const data = { positions, closedPositions, trades, quickValue };
+    lastData = data;
+    return data;
+  }
+
+  /* ---------- METRICS ---------- */
+  function computeMetrics(data) {
+    const { positions, closedPositions } = data;
+
+    const totalValue = positions.reduce((s, p) => s + Number(p.currentValue || 0), 0);
+    const unrealizedPnl = positions.reduce((s, p) => s + Number(p.cashPnl || 0), 0);
+    const realizedPnl = closedPositions.reduce((s, p) => s + Number(p.realizedPnl || 0), 0);
+
+    const closedWithPnl = closedPositions.filter(p => Number(p.realizedPnl) !== 0);
+    const wins = closedWithPnl.filter(p => Number(p.realizedPnl) > 0).length;
+    const winRate = closedWithPnl.length > 0 ? wins / closedWithPnl.length : 0;
+
+    return {
+      totalValue,
+      unrealizedPnl,
+      realizedPnl,
+      winRate,
+      activeCount: positions.length,
+      closedCount: closedPositions.length,
+    };
+  }
+
+  function renderMetrics(m) {
+    const tv = $('#m-total-value');
+    const up = $('#m-unrealized-pnl');
+    const rp = $('#m-realized-pnl');
+    const wr = $('#m-win-rate');
+    const ac = $('#m-active');
+    const cl = $('#m-closed');
+
+    tv.textContent = formatUSD(m.totalValue);
+    up.textContent = formatUSD(m.unrealizedPnl);
+    up.className = 'metric-value ' + metricClass(m.unrealizedPnl);
+    rp.textContent = formatUSD(m.realizedPnl);
+    rp.className = 'metric-value ' + metricClass(m.realizedPnl);
+    wr.textContent = (m.winRate * 100).toFixed(1) + '%';
+    ac.textContent = m.activeCount;
+    cl.textContent = m.closedCount;
+  }
+
+  /* ---------- CHARTS ---------- */
+  function destroyCharts() {
+    chartInstances.forEach(c => c.destroy());
+    chartInstances = [];
+  }
+
+  function chartDefaults() {
+    Chart.defaults.color = getCSSVar('--chart-label');
+    Chart.defaults.borderColor = getCSSVar('--border');
+    Chart.defaults.font.family = "'IBM Plex Mono', 'Consolas', monospace";
+    Chart.defaults.font.size = 11;
+  }
+
+  /**
+   * Build chart data from positions with an "Other" bucket.
+   * Shows top N individually, lumps the rest into "Other".
+   */
+  function buildPieData(items, maxSlices) {
+    if (items.length <= maxSlices) {
+      return { labels: items.map(i => i.label), values: items.map(i => i.value) };
+    }
+    const top = items.slice(0, maxSlices - 1);
+    const rest = items.slice(maxSlices - 1);
+    const otherValue = rest.reduce((s, i) => s + i.value, 0);
+    return {
+      labels: [...top.map(i => i.label), `Other (${rest.length})`],
+      values: [...top.map(i => i.value), otherValue],
+    };
+  }
+
+  function renderAllocationByPosition(positions) {
+    const ctx = $('#chart-alloc-position').getContext('2d');
+    const chartBorder = getCSSVar('--chart-border');
+    const labelColor = getCSSVar('--chart-label');
+
+    const sorted = [...positions]
+      .map(p => ({
+        label: ((p.title || 'Unknown').slice(0, 30)) + (p.outcome ? ` (${p.outcome})` : ''),
+        value: Number(p.currentValue || 0),
+      }))
+      .filter(p => p.value > 0)
+      .sort((a, b) => b.value - a.value);
+
+    const { labels, values } = buildPieData(sorted, 14);
+
+    const chart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: CHART_COLORS.slice(0, labels.length),
+          borderColor: chartBorder,
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '55%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: {
+              boxWidth: 10,
+              padding: 8,
+              font: { size: 10 },
+              color: labelColor,
+              generateLabels: function (chart) {
+                const data = chart.data;
+                return data.labels.map((label, i) => ({
+                  text: label.length > 28 ? label.slice(0, 28) + '…' : label,
+                  fillStyle: data.datasets[0].backgroundColor[i],
+                  fontColor: labelColor,
+                  strokeStyle: 'transparent',
+                  lineWidth: 0,
+                  index: i,
+                  hidden: !chart.getDataVisibility(i),
+                }));
+              },
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => ' ' + formatUSD(ctx.raw),
+            },
+          },
+        },
+      },
+    });
+    chartInstances.push(chart);
+  }
+
+  function renderWinnersLosers(positions, closedPositions) {
+    const greenColor = getCSSVar('--green');
+    const redColor = getCSSVar('--red');
+    const gridColor = getCSSVar('--chart-grid');
+
+    /* Combine active (cashPnl) and closed (realizedPnl) positions */
+    const allPnl = [
+      ...positions.map(p => ({ title: p.title, pnl: Number(p.cashPnl || 0) })),
+      ...closedPositions.map(p => ({ title: p.title, pnl: Number(p.realizedPnl || 0) })),
+    ].filter(p => p.pnl !== 0);
+
+    const sorted = [...allPnl].sort((a, b) => b.pnl - a.pnl);
+
+    const winners = sorted.filter(p => p.pnl > 0).slice(0, 5);
+    const losers = sorted.filter(p => p.pnl < 0).slice(-5).reverse();
+
+    /* Winners */
+    const ctxW = $('#chart-winners').getContext('2d');
+    const chartW = new Chart(ctxW, {
+      type: 'bar',
+      data: {
+        labels: winners.map(p => (p.title || '').slice(0, 22)),
+        datasets: [{
+          data: winners.map(p => p.pnl),
+          backgroundColor: greenColor,
+          borderRadius: 2,
+          barThickness: 22,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => formatUSD(ctx.raw) } },
+        },
+        scales: {
+          x: {
+            grid: { color: gridColor },
+            ticks: { callback: (v) => formatUSD(v) },
+          },
+          y: {
+            grid: { display: false },
+            ticks: { font: { size: 10 } },
+          },
+        },
+      },
+    });
+    chartInstances.push(chartW);
+
+    /* Losers */
+    const ctxL = $('#chart-losers').getContext('2d');
+    const chartL = new Chart(ctxL, {
+      type: 'bar',
+      data: {
+        labels: losers.map(p => (p.title || '').slice(0, 22)),
+        datasets: [{
+          data: losers.map(p => p.pnl),
+          backgroundColor: redColor,
+          borderRadius: 2,
+          barThickness: 22,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => formatUSD(ctx.raw) } },
+        },
+        scales: {
+          x: {
+            grid: { color: gridColor },
+            ticks: { callback: (v) => formatUSD(v) },
+          },
+          y: {
+            grid: { display: false },
+            ticks: { font: { size: 10 } },
+          },
+        },
+      },
+    });
+    chartInstances.push(chartL);
+  }
+
+  function renderTradeVolume(trades) {
+    const ctx = $('#chart-volume').getContext('2d');
+    const amberColor = getCSSVar('--amber');
+    const gridColor = getCSSVar('--chart-grid');
+    const gridLightColor = getCSSVar('--chart-grid-light');
+
+    if (!trades.length) {
+      const chart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: ['No data'], datasets: [{ data: [0] }] },
+        options: { responsive: true, maintainAspectRatio: false },
+      });
+      chartInstances.push(chart);
+      return;
+    }
+
+    /* Bucket trades by day */
+    const dayMap = {};
+    trades.forEach(t => {
+      const d = new Date(t.timestamp || t.createdAt || 0);
+      const key = d.toISOString().slice(0, 10);
+      if (!dayMap[key]) dayMap[key] = 0;
+      dayMap[key] += Math.abs(Number(t.size || 0) * Number(t.price || 0));
+    });
+
+    const sortedDays = Object.keys(dayMap).sort();
+    const values = sortedDays.map(d => dayMap[d]);
+
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: sortedDays.map(d => {
+          const dt = new Date(d + 'T00:00:00');
+          return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }),
+        datasets: [{
+          data: values,
+          borderColor: amberColor,
+          backgroundColor: amberColor + '14', /* ~8% opacity */
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: { label: (ctx) => 'Volume: ' + formatUSD(ctx.raw) },
+          },
+        },
+        scales: {
+          x: {
+            grid: { color: gridLightColor },
+            ticks: {
+              maxTicksLimit: 12,
+              font: { size: 10 },
+            },
+          },
+          y: {
+            grid: { color: gridColor },
+            ticks: { callback: (v) => formatUSD(v) },
+          },
+        },
+      },
+    });
+    chartInstances.push(chart);
+  }
+
+  function renderAllCharts(data) {
+    chartDefaults();
+    destroyCharts();
+    if (data.positions.length) {
+      renderAllocationByPosition(data.positions);
+    }
+    if (data.positions.length || data.closedPositions.length) {
+      renderWinnersLosers(data.positions, data.closedPositions);
+    }
+    renderTradeVolume(data.trades);
+  }
+
+  /* ---------- TABLES ---------- */
+  function renderActiveTable(positions, sortKey, sortDir) {
+    const tbody = $('#active-tbody');
+    const emptyEl = $('#active-empty');
+    const countEl = $('#active-count');
+
+    if (!positions.length) {
+      tbody.innerHTML = '';
+      emptyEl.classList.remove('hidden');
+      countEl.textContent = '0 positions';
+      return;
+    }
+
+    emptyEl.classList.add('hidden');
+    countEl.textContent = positions.length + ' position' + (positions.length !== 1 ? 's' : '');
+
+    const sorted = [...positions].sort((a, b) => {
+      let va = a[sortKey];
+      let vb = b[sortKey];
+
+      if (sortKey === 'endDate') {
+        va = va ? new Date(va).getTime() : 0;
+        vb = vb ? new Date(vb).getTime() : 0;
+      } else {
+        va = Number(va) || 0;
+        vb = Number(vb) || 0;
+      }
+
+      return sortDir === 'asc' ? va - vb : vb - va;
+    });
+
+    tbody.innerHTML = sorted.map(p => {
+      const cv = Number(p.currentValue || 0);
+      const cpnl = Number(p.cashPnl || 0);
+      const ppnl = Number(p.percentPnl || 0);
+      const outcomeClass = (p.outcome || '').toLowerCase() === 'yes' ? 'outcome-yes' :
+                           (p.outcome || '').toLowerCase() === 'no' ? 'outcome-no' : '';
+      return `<tr>
+        <td class="td-title" title="${escapeHTML(p.title)}">${escapeHTML(p.title)}</td>
+        <td class="td-outcome ${outcomeClass}">${escapeHTML(p.outcome)}</td>
+        <td class="td-num">${Number(p.size || 0).toFixed(2)}</td>
+        <td class="td-num">${Number(p.avgPrice || 0).toFixed(3)}</td>
+        <td class="td-num">${Number(p.curPrice || 0).toFixed(3)}</td>
+        <td class="td-num">${formatUSD(cv)}</td>
+        <td class="td-num ${pnlClass(cpnl)}">${formatUSD(cpnl)}</td>
+        <td class="td-num ${pnlClass(ppnl)}">${formatPct(ppnl)}</td>
+        <td>${formatDate(p.endDate)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderClosedTable(closedPositions, sortKey, sortDir) {
+    const tbody = $('#closed-tbody');
+    const emptyEl = $('#closed-empty');
+    const countEl = $('#closed-count');
+
+    if (!closedPositions.length) {
+      tbody.innerHTML = '';
+      emptyEl.classList.remove('hidden');
+      countEl.textContent = '0 positions';
+      return;
+    }
+
+    emptyEl.classList.add('hidden');
+    countEl.textContent = closedPositions.length + ' position' + (closedPositions.length !== 1 ? 's' : '');
+
+    const sorted = [...closedPositions].sort((a, b) => {
+      let va, vb;
+      if (sortKey === 'timestamp') {
+        va = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        vb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      } else {
+        va = Number(a[sortKey]) || 0;
+        vb = Number(b[sortKey]) || 0;
+      }
+      return sortDir === 'asc' ? va - vb : vb - va;
+    });
+
+    tbody.innerHTML = sorted.map(p => {
+      const rpnl = Number(p.realizedPnl || 0);
+      const outcomeClass = (p.outcome || '').toLowerCase() === 'yes' ? 'outcome-yes' :
+                           (p.outcome || '').toLowerCase() === 'no' ? 'outcome-no' : '';
+      return `<tr>
+        <td class="td-title" title="${escapeHTML(p.title)}">${escapeHTML(p.title)}</td>
+        <td class="td-outcome ${outcomeClass}">${escapeHTML(p.outcome)}</td>
+        <td class="td-num ${pnlClass(rpnl)}">${formatUSD(rpnl)}</td>
+        <td>${formatDate(p.timestamp)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  /* ---------- SORT CONTROLS ---------- */
+  function initSortControls() {
+    const activeButtons = document.querySelectorAll('.sort-btn');
+    activeButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentSortKey = btn.dataset.sort;
+        currentSortDir = btn.dataset.dir;
+        renderActiveTable(activePositions, currentSortKey, currentSortDir);
+      });
+    });
+
+    const closedButtons = document.querySelectorAll('.closed-sort-btn');
+    closedButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        closedButtons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        closedSortKey = btn.dataset.sort;
+        closedSortDir = btn.dataset.dir;
+        renderClosedTable(closedPositionsData, closedSortKey, closedSortDir);
+      });
+    });
+  }
+
+  /* ---------- NAVIGATION ---------- */
+  function showScreen(screen) {
+    entryScreen.classList.add('hidden');
+    loadingScreen.classList.add('hidden');
+    dashboard.classList.add('hidden');
+
+    screen.classList.remove('hidden');
+
+    if (screen === dashboard) {
+      dashboard.querySelectorAll('.anim-card').forEach(el => {
+        el.style.animation = 'none';
+        el.offsetHeight;
+        el.style.animation = '';
+      });
+    }
+  }
+
+  /* ---------- MAIN FLOW ---------- */
+  async function analyze(address) {
+    showScreen(loadingScreen);
+    loadingAddr.textContent = truncAddr(address);
+
+    try {
+      const data = await loadPortfolio(address);
+
+      /* Metrics */
+      const metrics = computeMetrics(data);
+      renderMetrics(metrics);
+
+      /* Charts */
+      renderAllCharts(data);
+
+      /* Tables */
+      activePositions = data.positions;
+      closedPositionsData = data.closedPositions;
+      renderActiveTable(activePositions, currentSortKey, currentSortDir);
+      renderClosedTable(closedPositionsData, closedSortKey, closedSortDir);
+
+      /* Show dashboard */
+      dashAddr.textContent = truncAddr(address);
+      showScreen(dashboard);
+
+    } catch (err) {
+      console.error(err);
+      showScreen(entryScreen);
+      entryError.textContent = 'Failed to load portfolio. Check the address and try again.';
+    }
+  }
+
+  /* ---------- INPUT VALIDATION ---------- */
+  function getFullAddress() {
+    const val = addressInput.value.trim();
+    if (val.startsWith('0x')) return val;
+    return '0x' + val;
+  }
+
+  function validateInput() {
+    const addr = getFullAddress();
+    const valid = ADDR_RE.test(addr);
+    loadBtn.disabled = !valid;
+    return valid;
+  }
+
+  /* ---------- EVENT LISTENERS ---------- */
+  addressInput.addEventListener('input', () => {
+    entryError.textContent = '';
+    validateInput();
+  });
+
+  addressInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !loadBtn.disabled) {
+      loadBtn.click();
+    }
+  });
+
+  loadBtn.addEventListener('click', () => {
+    const addr = getFullAddress();
+    if (!ADDR_RE.test(addr)) {
+      entryError.textContent = 'Invalid Ethereum address format.';
+      return;
+    }
+    entryError.textContent = '';
+    updateURL(addr);
+    analyze(addr);
+  });
+
+  backBtn.addEventListener('click', () => {
+    destroyCharts();
+    activePositions = [];
+    closedPositionsData = [];
+    lastData = null;
+    currentSortKey = 'currentValue';
+    currentSortDir = 'desc';
+    closedSortKey = 'timestamp';
+    closedSortDir = 'desc';
+
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    const defaultSort = document.querySelector('.sort-btn[data-sort="currentValue"]');
+    if (defaultSort) defaultSort.classList.add('active');
+
+    document.querySelectorAll('.closed-sort-btn').forEach(b => b.classList.remove('active'));
+    const defaultClosedSort = document.querySelector('.closed-sort-btn[data-sort="timestamp"]');
+    if (defaultClosedSort) defaultClosedSort.classList.add('active');
+
+    /* Push clean URL */
+    try { window.history.pushState({}, '', '/'); } catch (_) {
+      try { window.location.hash = ''; } catch (__) {}
+    }
+    showScreen(entryScreen);
+  });
+
+  /* ---------- URL ROUTING ---------- */
+
+  /** Extract address from URL path, query param, or hash */
+  function getAddressFromURL() {
+    /* 1. ?address=0x... query param */
+    const params = new URLSearchParams(window.location.search);
+    const queryAddr = params.get('address');
+    if (queryAddr && ADDR_RE.test(queryAddr)) return queryAddr;
+
+    /* 2. /0xABC... path-based */
+    const path = window.location.pathname.replace(/^\/+/, '');
+    if (ADDR_RE.test(path)) return path;
+
+    /* 3. #0xABC... hash fallback */
+    const hash = window.location.hash.slice(1);
+    if (ADDR_RE.test(hash)) return hash;
+
+    return null;
+  }
+
+  /** Update URL without page reload (safe for file:// and static hosts) */
+  function updateURL(address) {
+    try {
+      const newPath = '/' + address;
+      window.history.pushState({ address }, '', newPath);
+    } catch (_) {
+      /* pushState fails on file:// — fall back to hash */
+      try { window.location.hash = address; } catch (__) {}
+    }
+  }
+
+  /** Handle browser back/forward */
+  window.addEventListener('popstate', () => {
+    const address = getAddressFromURL();
+    if (address) {
+      addressInput.value = address.slice(2);
+      validateInput();
+      analyze(address);
+    } else {
+      destroyCharts();
+      activePositions = [];
+      lastData = null;
+      showScreen(entryScreen);
+    }
+  });
+
+  /** On page load, check URL for address */
+  function initFromURL() {
+    const address = getAddressFromURL();
+    if (address) {
+      addressInput.value = address.slice(2);
+      validateInput();
+      analyze(address);
+    }
+  }
+
+  /* ---------- INIT ---------- */
+  initSortControls();
+  initFromURL();
+
+})();

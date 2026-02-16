@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Polyfolio — Prediction Market Portfolio Viewer</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ENTRY SCREEN -->
+  <section id="entry-screen" class="entry-screen">
+    <button id="entry-theme-btn" class="theme-toggle entry-theme-toggle" aria-label="Toggle theme">
+      <span class="icon-moon">&#9789;</span>
+      <span class="icon-sun">&#9788;</span>
+    </button>
+    <div class="entry-inner">
+      <div class="brand-cluster anim-reveal" style="--delay: 0">
+        <h1 class="brand-title"><span class="brand-title-accent">Polyfolio</span></h1>
+        <p class="brand-sub">Explore any Polymarket wallet. View positions, PnL,<br>allocations, and trade history — all from one screen.</p>
+      </div>
+      <div class="input-block anim-reveal" style="--delay: 1">
+        <label for="address-input" class="input-label">Wallet Address</label>
+        <div class="input-row">
+          <span class="input-prefix">0x</span>
+          <input
+            type="text"
+            id="address-input"
+            placeholder="e4b2c...a9f03"
+            spellcheck="false"
+            autocomplete="off"
+          >
+        </div>
+        <button id="load-btn" class="load-btn" disabled>
+          <span class="btn-text">Analyze Portfolio</span>
+          <span class="btn-arrow">&rarr;</span>
+        </button>
+        <p id="entry-error" class="entry-error"></p>
+      </div>
+      <div class="entry-divider"></div>
+      <div class="entry-footer anim-reveal" style="--delay: 2">
+        <span>A <a href="https://github.com/azariak/PolymarketDataVisualizer" target="_blank" rel="noopener">project</a> by <a href="https://azariak.com" target="_blank" rel="noopener">Azaria Kelman</a></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- LOADING SCREEN -->
+  <section id="loading-screen" class="loading-screen hidden">
+    <div class="loading-inner">
+      <div class="loading-spinner"></div>
+      <p class="loading-label">Fetching positions...</p>
+      <p class="loading-address" id="loading-address"></p>
+    </div>
+  </section>
+
+  <!-- DASHBOARD -->
+  <section id="dashboard" class="dashboard hidden">
+    <header class="top-bar">
+      <div class="top-bar-left">
+        <span class="top-brand">Polyfolio</span>
+        <span class="top-sep">|</span>
+        <span class="top-address" id="dash-address"></span>
+      </div>
+      <div class="top-bar-right">
+        <button id="back-btn" class="back-btn">&larr; New Lookup</button>
+        <button id="dash-theme-btn" class="theme-toggle" aria-label="Toggle theme">
+          <span class="icon-moon">&#9789;</span>
+          <span class="icon-sun">&#9788;</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="metrics-strip">
+      <div class="metric-card anim-card" style="--ci: 0">
+        <span class="metric-label">Portfolio Value</span>
+        <span class="metric-value" id="m-total-value">&mdash;</span>
+      </div>
+      <div class="metric-card anim-card" style="--ci: 1">
+        <span class="metric-label">Unrealized PnL</span>
+        <span class="metric-value" id="m-unrealized-pnl">&mdash;</span>
+      </div>
+      <div class="metric-card anim-card" style="--ci: 2">
+        <span class="metric-label">Realized PnL</span>
+        <span class="metric-value" id="m-realized-pnl">&mdash;</span>
+      </div>
+      <div class="metric-card anim-card" style="--ci: 3">
+        <span class="metric-label">Win Rate</span>
+        <span class="metric-value" id="m-win-rate">&mdash;</span>
+      </div>
+      <div class="metric-card anim-card" style="--ci: 4">
+        <span class="metric-label">Active</span>
+        <span class="metric-value" id="m-active">&mdash;</span>
+      </div>
+      <div class="metric-card anim-card" style="--ci: 5">
+        <span class="metric-label">Closed</span>
+        <span class="metric-value" id="m-closed">&mdash;</span>
+      </div>
+    </div>
+
+    <div class="charts-row charts-row-full">
+      <div class="chart-panel chart-panel-wide anim-card" style="--ci: 2">
+        <h3 class="panel-title">Allocation by Position</h3>
+        <div class="chart-wrap chart-wrap-alloc"><canvas id="chart-alloc-position"></canvas></div>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <div class="chart-panel anim-card" style="--ci: 4">
+        <h3 class="panel-title">Top Winners</h3>
+        <div class="chart-wrap chart-wrap-bar"><canvas id="chart-winners"></canvas></div>
+      </div>
+      <div class="chart-panel anim-card" style="--ci: 5">
+        <h3 class="panel-title">Top Losers</h3>
+        <div class="chart-wrap chart-wrap-bar"><canvas id="chart-losers"></canvas></div>
+      </div>
+    </div>
+
+    <div class="charts-row charts-row-full">
+      <div class="chart-panel chart-panel-wide anim-card" style="--ci: 6">
+        <h3 class="panel-title">Trade Volume Over Time</h3>
+        <div class="chart-wrap chart-wrap-line"><canvas id="chart-volume"></canvas></div>
+      </div>
+    </div>
+
+    <div class="table-section anim-card" style="--ci: 7">
+      <h3 class="panel-title">Active Positions</h3>
+      <div class="table-controls">
+        <span class="table-count" id="active-count"></span>
+        <div class="sort-controls">
+          <span class="sort-label">Sort:</span>
+          <button class="sort-btn active" data-sort="currentValue" data-dir="desc">Current</button>
+          <button class="sort-btn" data-sort="cashPnl" data-dir="desc">Cash PnL</button>
+          <button class="sort-btn" data-sort="percentPnl" data-dir="desc">% PnL</button>
+          <button class="sort-btn" data-sort="endDate" data-dir="asc">Resolving</button>
+          <button class="sort-btn" data-sort="curPrice" data-dir="desc">Price</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" id="active-table">
+          <thead>
+            <tr>
+              <th class="th-title">Title</th>
+              <th>Outcome</th>
+              <th class="th-num">Size</th>
+              <th class="th-num">Avg Price</th>
+              <th class="th-num">Cur Price</th>
+              <th class="th-num">Value</th>
+              <th class="th-num">Cash PnL</th>
+              <th class="th-num">%</th>
+              <th>Resolving</th>
+            </tr>
+          </thead>
+          <tbody id="active-tbody"></tbody>
+        </table>
+      </div>
+      <p class="empty-state hidden" id="active-empty">No active positions found.</p>
+    </div>
+
+    <div class="table-section anim-card" style="--ci: 8">
+      <h3 class="panel-title">Closed Positions</h3>
+      <div class="table-controls">
+        <span class="table-count" id="closed-count"></span>
+        <div class="sort-controls" id="closed-sort-controls">
+          <span class="sort-label">Sort:</span>
+          <button class="closed-sort-btn active" data-sort="timestamp" data-dir="desc">Date</button>
+          <button class="closed-sort-btn" data-sort="realizedPnl" data-dir="desc">Realized PnL</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table" id="closed-table">
+          <thead>
+            <tr>
+              <th class="th-title">Title</th>
+              <th>Outcome</th>
+              <th class="th-num">Realized PnL</th>
+              <th>Closed</th>
+            </tr>
+          </thead>
+          <tbody id="closed-tbody"></tbody>
+        </table>
+      </div>
+      <p class="empty-state hidden" id="closed-empty">No closed positions found.</p>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
