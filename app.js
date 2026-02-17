@@ -273,6 +273,186 @@
     cl.textContent = m.closedCount;
   }
 
+  /* ---------- PDF EXPORT ---------- */
+  function generatePDF() {
+    if (!lastData) return;
+    if (!window.jspdf) { alert('PDF library failed to load. Please refresh and try again.'); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pw = doc.internal.pageSize.getWidth();
+    const margin = 14;
+    const colW = pw - margin * 2;
+    let y = 18;
+
+    function checkPage(needed) {
+      if (y + needed > 280) { doc.addPage(); y = 18; }
+    }
+
+    /* --- Title --- */
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Polyfolio Report', margin, y);
+    y += 7;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(120);
+    const addr = dashAddr.textContent || '';
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    doc.text(addr + '  |  ' + dateStr + ' at ' + timeStr, margin, y);
+    doc.setTextColor(0);
+    y += 10;
+
+    /* --- Metrics --- */
+    const m = computeMetrics(lastData);
+    const retVal = (m.returnPct >= 0 ? '+' : '') + (m.returnPct * 100).toFixed(1) + '%';
+    const rankStr = m.rank ? '#' + Number(m.rank).toLocaleString() : '—';
+    const metrics = [
+      ['Portfolio Value', formatUSD(m.totalValue)],
+      ['Return %', retVal],
+      ['Win Rate', (m.winRate * 100).toFixed(1) + '%'],
+      ['Realized PnL', formatUSD(m.realizedPnl)],
+      ['Unrealized PnL', formatUSD(m.unrealizedPnl)],
+      ['Leaderboard Rank', rankStr],
+      ['Active Positions', String(m.activeCount)],
+      ['Closed Positions', String(m.closedCount)],
+    ];
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Summary', margin, y);
+    y += 6;
+
+    doc.setFontSize(9);
+    const mColW = colW / 4;
+    metrics.forEach((pair, i) => {
+      const col = i % 4;
+      const x = margin + col * mColW;
+      if (i > 0 && col === 0) y += 12;
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(120);
+      doc.text(pair[0], x, y);
+      doc.setTextColor(0);
+      doc.setFont('helvetica', 'bold');
+      doc.text(pair[1], x, y + 4.5);
+    });
+    y += 18;
+
+    /* --- Allocation Chart --- */
+    const chartCanvas = $('#chart-alloc-position');
+    if (chartCanvas) {
+      checkPage(75);
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0);
+      doc.text('Allocation by Position', margin, y);
+      y += 4;
+      try {
+        const imgData = chartCanvas.toDataURL('image/png');
+        const chartSize = 60;
+        doc.addImage(imgData, 'PNG', margin, y, chartSize, chartSize);
+        y += chartSize + 6;
+      } catch (_) { y += 4; }
+    }
+
+    /* --- Helper: draw table --- */
+    function drawTable(title, headers, rows, widths) {
+      checkPage(20);
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0);
+      doc.text(title, margin, y);
+      y += 6;
+
+      /* If no custom widths, give title col 40% and split the rest equally */
+      const cellWidths = widths || (() => {
+        const titleW = colW * 0.4;
+        const restW = (colW - titleW) / (headers.length - 1);
+        return headers.map((_, i) => i === 0 ? titleW : restW);
+      })();
+      const rowH = 5.5;
+
+      /* Header row */
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'bold');
+      doc.setFillColor(240, 237, 230);
+      doc.rect(margin, y - 3.5, colW, rowH, 'F');
+      headers.forEach((h, i) => {
+        const x = margin + cellWidths.slice(0, i).reduce((s, w) => s + w, 0);
+        doc.text(h, x + 1, y);
+      });
+      y += rowH;
+
+      /* Data rows */
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      rows.forEach((row, ri) => {
+        checkPage(rowH + 2);
+        if (ri % 2 === 0) {
+          doc.setFillColor(250, 248, 245);
+          doc.rect(margin, y - 3.5, colW, rowH, 'F');
+        }
+        row.forEach((cell, i) => {
+          const x = margin + cellWidths.slice(0, i).reduce((s, w) => s + w, 0);
+          const maxW = cellWidths[i] - 2;
+          let txt = String(cell || '');
+          while (txt.length > 3 && doc.getTextWidth(txt) > maxW) {
+            txt = txt.slice(0, -4) + '...';
+          }
+          doc.text(txt, x + 1, y);
+        });
+        y += rowH;
+      });
+      y += 4;
+    }
+
+    /* --- Active Positions Table --- */
+    const positions = lastData.positions || [];
+    if (positions.length) {
+      const activeHeaders = ['Title', 'Outcome', 'Size', 'Avg Price', 'Cur Price', 'Value', 'PnL', '%'];
+      const activeRows = positions.map(p => {
+        const ppnl = Number(p.percentPnl || 0);
+        return [
+          p.title || 'Unknown',
+          p.outcome || '',
+          Number(p.size || 0).toFixed(2),
+          Number(p.avgPrice || 0).toFixed(3),
+          Number(p.curPrice || 0).toFixed(3),
+          formatUSD(Number(p.currentValue || 0)),
+          formatUSD(Number(p.cashPnl || 0)),
+          (ppnl >= 0 ? '+' : '') + ppnl.toFixed(1) + '%',
+        ];
+      });
+      drawTable('Active Positions (' + positions.length + ')', activeHeaders, activeRows);
+    }
+
+    /* --- Closed Positions Table --- */
+    const closed = lastData.closedPositions || [];
+    if (closed.length) {
+      const closedHeaders = ['Title', 'Outcome', 'Realized PnL', '% Return', 'Closed'];
+      const closedRows = closed.map(p => {
+        const rpnl = Number(p.realizedPnl || 0);
+        const costBasis = Number(p.totalBought || 0) * Number(p.avgPrice || 0);
+        const rpct = costBasis > 0 ? (rpnl / costBasis) * 100 : 0;
+        return [
+          p.title || 'Unknown',
+          p.outcome || '',
+          formatUSD(rpnl),
+          (rpct >= 0 ? '+' : '') + rpct.toFixed(1) + '%',
+          formatDate(p.timestamp),
+        ];
+      });
+      drawTable('Closed Positions (' + closed.length + ')', closedHeaders, closedRows);
+    }
+
+    /* --- Save --- */
+    const filename = 'polyfolio-' + (addr.slice(0, 10) || 'report') + '.pdf';
+    doc.save(filename);
+  }
+
+  $('#pdf-btn').addEventListener('click', generatePDF);
+
   /* ---------- CHARTS ---------- */
   function destroyCharts() {
     chartInstances.forEach(c => c.destroy());
@@ -765,6 +945,7 @@
     REWARD: 'Rewards',
     CONVERSION: 'Conversions',
     MAKER_REBATE: 'Rebates',
+    YIELD: 'Yields',
   };
 
   const TL_TYPE_ICONS = {
@@ -774,7 +955,8 @@
     MERGE: '\u2726',       /* ✦ */
     REWARD: '\u2605',      /* ★ */
     CONVERSION: '\u21C4',  /* ⇄ */
-    MAKER_REBATE: '\u2668' /* ♨ */
+    MAKER_REBATE: '\u2668', /* ♨ */
+    YIELD: '\u2234',        /* ∴ */
   };
 
   function buildTimelineFilters(activity) {
