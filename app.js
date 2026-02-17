@@ -834,6 +834,7 @@
       if (!tlTypeFilters.has(ev.type || 'TRADE')) return false;
       const side = ev.side || '';
       if (!tlSideFilters.has(side)) return false;
+      if (ev.type === 'YIELD' && Math.abs(Number(ev.usdcSize || 0)) < 0.005) return false;
       return true;
     });
 
