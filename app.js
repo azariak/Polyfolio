@@ -1240,6 +1240,7 @@
 
       /* Show dashboard */
       dashAddr.textContent = address;
+      dashAddr.href = `https://polymarket.com/@${address}`;
       showScreen(dashboard);
 
     } catch (err) {

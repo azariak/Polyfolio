@@ -451,6 +451,7 @@ body {
   font-family: var(--font-data);
   font-size: 0.78rem;
   color: var(--text-muted);
+  text-decoration: none;
 }
 
 .top-bar-right {
