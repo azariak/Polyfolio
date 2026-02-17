@@ -225,10 +225,15 @@
     const wins = closedWithPnl.filter(p => Number(p.realizedPnl) > 0).length;
     const winRate = closedWithPnl.length > 0 ? wins / closedWithPnl.length : 0;
 
+    const totalPnl = unrealizedPnl + realizedPnl;
+    const costBasis = totalValue - unrealizedPnl;
+    const returnPct = costBasis > 0 ? totalPnl / costBasis : 0;
+
     return {
       totalValue,
       unrealizedPnl,
       realizedPnl,
+      returnPct,
       winRate,
       activeCount: positions.length,
       closedCount: closedPositions.length,
@@ -239,6 +244,7 @@
     const tv = $('#m-total-value');
     const up = $('#m-unrealized-pnl');
     const rp = $('#m-realized-pnl');
+    const ret = $('#m-return-pct');
     const wr = $('#m-win-rate');
     const ac = $('#m-active');
     const cl = $('#m-closed');
@@ -248,6 +254,9 @@
     up.className = 'metric-value ' + metricClass(m.unrealizedPnl);
     rp.textContent = formatUSD(m.realizedPnl);
     rp.className = 'metric-value ' + metricClass(m.realizedPnl);
+    const retVal = (m.returnPct * 100).toFixed(1) + '%';
+    ret.textContent = (m.returnPct >= 0 ? '+' : '') + retVal;
+    ret.className = 'metric-value ' + metricClass(m.returnPct);
     wr.textContent = (m.winRate * 100).toFixed(1) + '%';
     ac.textContent = m.activeCount;
     cl.textContent = m.closedCount;

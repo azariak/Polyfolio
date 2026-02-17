@@ -459,10 +459,13 @@ body {
 /* ---------- METRICS STRIP ---------- */
 .metrics-strip {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: var(--gap);
   margin-bottom: 28px;
 }
+
+.metrics-strip::-webkit-scrollbar { display: none; }
+.metrics-strip { scrollbar-width: none; }
 
 .metric-card {
   background: var(--bg-card);
@@ -822,16 +825,29 @@ body {
 
 /* ---------- RESPONSIVE ---------- */
 @media (max-width: 1100px) {
-  .metrics-strip { grid-template-columns: repeat(3, 1fr); }
+  .metrics-strip { grid-template-columns: repeat(4, 1fr); }
 }
 
 @media (max-width: 768px) {
   /* Dashboard shell */
   .dashboard { padding: 0 16px 60px; }
 
-  /* Metrics */
-  .metrics-strip { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 20px; }
-  .metric-card { padding: 14px 16px; }
+  /* Metrics — horizontal scroll carousel */
+  .metrics-strip {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding-bottom: 6px;
+  }
+  .metric-card {
+    flex: 0 0 auto;
+    min-width: 140px;
+    padding: 14px 16px;
+    scroll-snap-align: start;
+  }
   .metric-value { font-size: 1.1rem; }
 
   /* Charts */
@@ -900,9 +916,8 @@ body {
 @media (max-width: 480px) {
   .dashboard { padding: 0 12px 48px; }
 
-  /* Metrics single column */
-  .metrics-strip { grid-template-columns: 1fr; gap: 8px; }
-  .metric-card { padding: 12px 14px; gap: 4px; }
+  /* Metrics — smaller cards in carousel */
+  .metric-card { min-width: 120px; padding: 12px 14px; gap: 4px; }
   .metric-value { font-size: 1rem; }
 
   /* Entry screen */
