@@ -979,71 +979,23 @@
     if (defaultClosedSort) defaultClosedSort.classList.add('active');
 
     /* Push clean URL */
-    try { window.history.pushState({}, '', BASE_PATH); } catch (_) {
-      try { window.location.hash = ''; } catch (__) {}
-    }
+    window.location.hash = '';
     showScreen(entryScreen);
   });
 
-  /* ---------- URL ROUTING ---------- */
+  /* ---------- URL ROUTING (hash-based) ---------- */
 
-  /* Detect base path for GitHub Pages or subdirectory hosting */
-  const BASE_PATH = (function () {
-    const script = document.querySelector('script[src="app.js"]');
-    if (script) {
-      const page = window.location.pathname;
-      /* Strip trailing address-like segment to find the base */
-      const base = page.replace(/\/0x[0-9a-fA-F]+\/?$/, '/');
-      /* If what remains looks like a directory, use it */
-      if (base.endsWith('/')) return base;
-    }
-    return '/';
-  })();
-
-  /** Extract address from URL path, query param, or hash */
   function getAddressFromURL() {
-    /* 0. ?p=/0x... redirect from 404.html (GitHub Pages SPA) */
-    const params = new URLSearchParams(window.location.search);
-    const redirectPath = params.get('p');
-    if (redirectPath) {
-      const cleaned = redirectPath.replace(/^\/+/, '');
-      if (ADDR_RE.test(cleaned)) {
-        /* Clean up the URL */
-        window.history.replaceState({}, '', BASE_PATH + cleaned);
-        return cleaned;
-      }
-    }
-
-    /* 1. ?address=0x... query param */
-    const queryAddr = params.get('address');
-    if (queryAddr && ADDR_RE.test(queryAddr)) return queryAddr;
-
-    /* 2. /base/0xABC... path-based */
-    let path = window.location.pathname;
-    if (path.startsWith(BASE_PATH)) path = path.slice(BASE_PATH.length);
-    path = path.replace(/^\/+|\/+$/g, '');
-    if (ADDR_RE.test(path)) return path;
-
-    /* 3. #0xABC... hash fallback */
     const hash = window.location.hash.slice(1);
     if (ADDR_RE.test(hash)) return hash;
-
     return null;
   }
 
-  /** Update URL without page reload (safe for file:// and static hosts) */
   function updateURL(address) {
-    try {
-      const newPath = BASE_PATH + address;
-      window.history.pushState({ address }, '', newPath);
-    } catch (_) {
-      /* pushState fails on file:// — fall back to hash */
-      try { window.location.hash = address; } catch (__) {}
-    }
+    window.location.hash = address;
   }
 
-  /** Handle browser back/forward */
-  window.addEventListener('popstate', () => {
+  window.addEventListener('hashchange', () => {
     const address = getAddressFromURL();
     if (address) {
       addressInput.value = address.slice(2);
