@@ -374,13 +374,23 @@
     const redColor = getCSSVar('--red');
     const gridColor = getCSSVar('--chart-grid');
 
-    /* Combine active (cashPnl) and closed (realizedPnl) positions */
-    const allPnl = [
-      ...positions.map(p => ({ title: p.title, slug: p.slug || null, pnl: Number(p.cashPnl || 0) })),
-      ...closedPositions.map(p => ({ title: p.title, slug: p.slug || null, pnl: Number(p.realizedPnl || 0) })),
-    ].filter(p => p.pnl !== 0);
+    /* Combine active (cashPnl) and closed (realizedPnl), aggregate by market title */
+    const pnlMap = {};
+    for (const p of positions) {
+      const key = p.title || 'Unknown';
+      if (!pnlMap[key]) pnlMap[key] = { title: key, slug: p.slug || null, pnl: 0 };
+      pnlMap[key].pnl += Number(p.cashPnl || 0);
+      if (!pnlMap[key].slug && p.slug) pnlMap[key].slug = p.slug;
+    }
+    for (const p of closedPositions) {
+      const key = p.title || 'Unknown';
+      if (!pnlMap[key]) pnlMap[key] = { title: key, slug: p.slug || null, pnl: 0 };
+      pnlMap[key].pnl += Number(p.realizedPnl || 0);
+      if (!pnlMap[key].slug && p.slug) pnlMap[key].slug = p.slug;
+    }
 
-    const sorted = [...allPnl].sort((a, b) => b.pnl - a.pnl);
+    const allPnl = Object.values(pnlMap).filter(p => p.pnl !== 0);
+    const sorted = allPnl.sort((a, b) => b.pnl - a.pnl);
 
     const winners = sorted.filter(p => p.pnl > 0).slice(0, 5);
     const losers = sorted.filter(p => p.pnl < 0).slice(-5).reverse();
