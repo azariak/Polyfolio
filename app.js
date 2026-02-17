@@ -197,10 +197,11 @@
   let lastData = null;
 
   async function loadPortfolio(address) {
-    const [positions, closedPositions, trades] = await Promise.all([
+    const [positions, closedPositions, trades, activity] = await Promise.all([
       fetchAllPages('/positions?', address, ENDPOINT_CONFIG.positions).catch(() => []),
       fetchAllPages('/closed-positions?', address, ENDPOINT_CONFIG.closedPositions).catch(() => []),
       fetchAllPages('/trades?', address, ENDPOINT_CONFIG.trades).catch(() => []),
+      fetchAllPages('/activity?', address, ENDPOINT_CONFIG.activity).catch(() => []),
     ]);
 
     let quickValue = null;
@@ -208,7 +209,7 @@
       quickValue = await fetchJSON(`/value?user=${address}`);
     } catch (_) {}
 
-    const data = { positions, closedPositions, trades, quickValue };
+    const data = { positions, closedPositions, trades, activity, quickValue };
     lastData = data;
     return data;
   }
@@ -614,6 +615,194 @@
     chartInstances.push(chart);
   }
 
+  /* ---------- ACTIVITY TIMELINE ---------- */
+  let timelineActivity = [];
+  let tlTypeFilters = new Set();
+  let tlSideFilters = new Set(['BUY', 'SELL', '']); /* include events with no side */
+
+  const TL_TYPE_LABELS = {
+    TRADE: 'Trades',
+    REDEEM: 'Redeems',
+    SPLIT: 'Splits',
+    MERGE: 'Merges',
+    REWARD: 'Rewards',
+    CONVERSION: 'Conversions',
+    MAKER_REBATE: 'Rebates',
+  };
+
+  const TL_TYPE_ICONS = {
+    TRADE: '\u2194',       /* ↔ */
+    REDEEM: '\u2714',      /* ✔ */
+    SPLIT: '\u2702',       /* ✂ */
+    MERGE: '\u2726',       /* ✦ */
+    REWARD: '\u2605',      /* ★ */
+    CONVERSION: '\u21C4',  /* ⇄ */
+    MAKER_REBATE: '\u2668' /* ♨ */
+  };
+
+  function buildTimelineFilters(activity) {
+    const filterBar = $('#tl-filters');
+
+    /* Discover types and sides present */
+    const typeCounts = {};
+    let buyCount = 0, sellCount = 0;
+    activity.forEach(ev => {
+      const t = ev.type || 'TRADE';
+      typeCounts[t] = (typeCounts[t] || 0) + 1;
+      if (ev.side === 'BUY') buyCount++;
+      else if (ev.side === 'SELL') sellCount++;
+    });
+
+    const types = Object.keys(typeCounts).sort((a, b) => (typeCounts[b] - typeCounts[a]));
+    tlTypeFilters = new Set(types);
+    tlSideFilters = new Set(['BUY', 'SELL', '']);
+
+    let html = '<span class="sort-label">Filter:</span>';
+
+    /* Side filters */
+    if (buyCount) html += '<button class="tl-filter-btn active" data-side="BUY">Buy</button>';
+    if (sellCount) html += '<button class="tl-filter-btn active" data-side="SELL">Sell</button>';
+
+    /* Separator if both sides and types exist */
+    if ((buyCount || sellCount) && types.length) html += '<span class="tl-filter-sep"></span>';
+
+    /* Type filters */
+    types.forEach(type => {
+      const label = TL_TYPE_LABELS[type] || type;
+      html += '<button class="tl-filter-btn active" data-type="' + type + '">' + escapeHTML(label) + '</button>';
+    });
+
+    filterBar.innerHTML = html;
+
+    filterBar.querySelectorAll('.tl-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const type = btn.dataset.type;
+        const side = btn.dataset.side;
+
+        if (type) {
+          if (tlTypeFilters.has(type)) { tlTypeFilters.delete(type); btn.classList.remove('active'); }
+          else { tlTypeFilters.add(type); btn.classList.add('active'); }
+        } else if (side) {
+          if (tlSideFilters.has(side)) { tlSideFilters.delete(side); btn.classList.remove('active'); }
+          else { tlSideFilters.add(side); btn.classList.add('active'); }
+        }
+        renderTimelineEvents();
+      });
+    });
+  }
+
+  function renderTimelineEvents() {
+    const container = $('#activity-timeline');
+    const filtered = timelineActivity.filter(ev => {
+      if (!tlTypeFilters.has(ev.type || 'TRADE')) return false;
+      const side = ev.side || '';
+      if (!tlSideFilters.has(side)) return false;
+      return true;
+    });
+
+    if (!filtered.length) {
+      container.innerHTML = '<p class="empty-state">No matching activity.</p>';
+      return;
+    }
+
+    /* Sort by timestamp descending */
+    const sorted = [...filtered].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    /* Group by date */
+    const groups = {};
+    sorted.forEach(ev => {
+      const ts = ev.timestamp ? new Date(ev.timestamp * 1000) : null;
+      const key = ts ? ts.toISOString().slice(0, 10) : 'Unknown';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(ev);
+    });
+
+    let html = '';
+    const dateKeys = Object.keys(groups);
+
+    dateKeys.forEach(dateKey => {
+      const events = groups[dateKey];
+      const dt = new Date(dateKey + 'T00:00:00');
+      const dateLabel = isNaN(dt) ? dateKey : dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+
+      html += '<div class="tl-day">';
+      html += '<div class="tl-date">' + escapeHTML(dateLabel) + '</div>';
+      html += '<div class="tl-events">';
+
+      events.forEach(ev => {
+        const type = ev.type || 'TRADE';
+        const icon = TL_TYPE_ICONS[type] || '\u25CF';
+        const side = ev.side || '';
+        const title = ev.title || 'Unknown Market';
+        const outcome = ev.outcome || '';
+        const usdcSize = Number(ev.usdcSize || 0);
+        const price = Number(ev.price || 0);
+        const size = Number(ev.size || 0);
+        const slug = ev.slug || ev.eventSlug || '';
+        const ts = ev.timestamp ? new Date(ev.timestamp * 1000) : null;
+        const time = ts ? ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+
+        const sideClass = side === 'BUY' ? 'tl-buy' : side === 'SELL' ? 'tl-sell' : '';
+        const typeLabel = type.charAt(0) + type.slice(1).toLowerCase().replace('_', ' ');
+
+        html += '<div class="tl-event">';
+        html += '<div class="tl-icon ' + sideClass + '">' + icon + '</div>';
+        html += '<div class="tl-body">';
+        html += '<div class="tl-headline">';
+        if (type === 'TRADE' && side) {
+          html += '<span class="tl-side ' + sideClass + '">' + side + '</span> ';
+        } else {
+          html += '<span class="tl-type">' + escapeHTML(typeLabel) + '</span> ';
+        }
+        if (slug) {
+          html += '<span class="tl-title tl-title-link" data-slug="' + escapeHTML(slug) + '">' + escapeHTML(title.length > 60 ? title.slice(0, 60) + '\u2026' : title) + '</span>';
+        } else {
+          html += '<span class="tl-title">' + escapeHTML(title.length > 60 ? title.slice(0, 60) + '\u2026' : title) + '</span>';
+        }
+        html += '</div>';
+
+        html += '<div class="tl-details">';
+        if (outcome) html += '<span class="tl-outcome">' + escapeHTML(outcome) + '</span>';
+        if (size) html += '<span class="tl-size">' + size.toFixed(2) + ' shares</span>';
+        if (price) html += '<span class="tl-price">@ ' + price.toFixed(2) + '\u00A2</span>';
+        if (usdcSize) html += '<span class="tl-usdc">' + formatUSD(usdcSize) + '</span>';
+        if (time) html += '<span class="tl-time">' + time + '</span>';
+        html += '</div>';
+
+        html += '</div></div>';
+      });
+
+      html += '</div></div>';
+    });
+
+    container.innerHTML = html;
+
+    /* Embed hover on linked titles */
+    container.querySelectorAll('.tl-title-link').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        const slug = el.dataset.slug;
+        if (slug) {
+          clearTimeout(embedTimeout);
+          showEmbedPopover(el, slug);
+        }
+      });
+      el.addEventListener('mouseleave', () => { hideEmbedPopover(); });
+    });
+  }
+
+  function renderTimeline(activity) {
+    const container = $('#activity-timeline');
+    const filterBar = $('#tl-filters');
+    if (!activity || !activity.length) {
+      filterBar.innerHTML = '';
+      container.innerHTML = '<p class="empty-state">No activity found.</p>';
+      return;
+    }
+    timelineActivity = activity;
+    buildTimelineFilters(activity);
+    renderTimelineEvents();
+  }
+
   function renderAllCharts(data) {
     chartDefaults();
     destroyCharts();
@@ -623,6 +812,7 @@
     if (data.positions.length || data.closedPositions.length) {
       renderWinnersLosers(data.positions, data.closedPositions);
     }
+    renderTimeline(data.activity);
     renderTradeVolume(data.trades);
   }
 

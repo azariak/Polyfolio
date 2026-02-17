@@ -128,12 +128,24 @@
 
     <div class="charts-row charts-row-full">
       <div class="chart-panel chart-panel-wide anim-card" style="--ci: 6">
+        <div class="table-controls">
+          <h3 class="panel-title tl-panel-title">Activity Timeline</h3>
+          <div id="tl-filters" class="sort-controls tl-filters"></div>
+        </div>
+        <div id="activity-timeline" class="activity-timeline">
+          <p class="empty-state">No activity found.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="charts-row charts-row-full">
+      <div class="chart-panel chart-panel-wide anim-card" style="--ci: 7">
         <h3 class="panel-title">Notional Trade Volume</h3>
         <div class="chart-wrap chart-wrap-line"><canvas id="chart-volume"></canvas></div>
       </div>
     </div>
 
-    <div class="table-section anim-card" style="--ci: 7">
+    <div class="table-section anim-card" style="--ci: 8">
       <h3 class="panel-title">Active Positions</h3>
       <div class="table-controls">
         <span class="table-count" id="active-count"></span>
@@ -167,7 +179,7 @@
       <p class="empty-state hidden" id="active-empty">No active positions found.</p>
     </div>
 
-    <div class="table-section anim-card" style="--ci: 8">
+    <div class="table-section anim-card" style="--ci: 9">
       <h3 class="panel-title">Closed Positions</h3>
       <div class="table-controls">
         <span class="table-count" id="closed-count"></span>

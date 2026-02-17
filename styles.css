@@ -749,6 +749,196 @@ body {
   font-size: 0.88rem;
 }
 
+/* ---------- ACTIVITY TIMELINE ---------- */
+.tl-panel-title {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.tl-filters {
+  flex-wrap: wrap;
+}
+
+.tl-filter-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-size: 0.68rem;
+  padding: 5px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.tl-filter-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.tl-filter-btn.active {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+
+.tl-filter-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  align-self: center;
+}
+
+.activity-timeline {
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.tl-day {
+  position: relative;
+  padding-left: 20px;
+  margin-bottom: 8px;
+}
+
+.tl-day::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 28px;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.tl-day:last-child::before { display: none; }
+
+.tl-date {
+  font-family: var(--font-body);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 0 8px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  z-index: 1;
+}
+
+.tl-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tl-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.tl-event:hover { background: var(--row-hover); }
+
+.tl-icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  background: var(--bg-card-alt);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.tl-icon.tl-buy { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+.tl-icon.tl-sell { color: var(--red); border-color: var(--red); background: var(--red-bg); }
+
+.tl-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.tl-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tl-side {
+  font-family: var(--font-data);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tl-side.tl-buy { color: var(--green); }
+.tl-side.tl-sell { color: var(--red); }
+
+.tl-type {
+  font-family: var(--font-data);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.tl-title {
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tl-title-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 0.15s;
+}
+
+.tl-title-link:hover { text-decoration-color: var(--accent); }
+
+.tl-details {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+
+.tl-details > span {
+  font-family: var(--font-data);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.tl-outcome {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.65rem !important;
+}
+
+.tl-usdc { font-weight: 600; color: var(--text-secondary) !important; }
+
+.tl-time { color: var(--text-muted); }
+
 /* ---------- EMBED POPOVER ---------- */
 .embed-popover {
   position: fixed;
@@ -902,6 +1092,13 @@ body {
   /* Entry screen */
   .brand-title, .brand-title-accent { font-size: 3.2rem; }
   .brand-sub { font-size: 0.95rem; }
+
+  /* Timeline */
+  .activity-timeline { max-height: 360px; }
+  .tl-filters { gap: 5px; }
+  .tl-filter-btn { font-size: 0.62rem; padding: 4px 8px; }
+  .tl-title { font-size: 0.75rem; }
+  .tl-details { gap: 8px; }
 
   /* Embed popover */
   .embed-popover {
