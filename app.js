@@ -293,7 +293,7 @@
     const otherNames = rest.map(i => i.fullLabel || i.label);
     return {
       labels: [...top.map(i => i.label), `Other (${rest.length})`],
-      fullLabels: [...top.map(i => i.fullLabel || i.label), `Other: ${otherNames.join(', ')}`],
+      fullLabels: [...top.map(i => i.fullLabel || i.label), `Other - [${otherNames.join(', ')}]`],
       slugs: [...top.map(i => i.slug || null), null],
       values: [...top.map(i => i.value), otherValue],
     };
@@ -997,7 +997,7 @@
         <td class="td-num">${Number(p.curPrice || 0).toFixed(3)}</td>
         <td class="td-num">${formatUSD(cv)}</td>
         <td class="td-num ${pnlClass(cpnl)}">${formatUSD(cpnl)}</td>
-        <td class="td-num ${pnlClass(ppnl)}">${formatPct(ppnl)}</td>
+        <td class="td-num ${pnlClass(ppnl)}">${(ppnl >= 0 ? '+' : '') + ppnl.toFixed(1) + '%'}</td>
         <td>${formatDate(p.endDate)}</td>
       </tr>`;
     }).join('');
@@ -1042,6 +1042,8 @@
 
     tbody.innerHTML = page.map(p => {
       const rpnl = Number(p.realizedPnl || 0);
+      const costBasis = Number(p.totalBought || 0) * Number(p.avgPrice || 0);
+      const rpct = costBasis > 0 ? (rpnl / costBasis) * 100 : 0;
       const outcomeClass = (p.outcome || '').toLowerCase() === 'yes' ? 'outcome-yes' :
                            (p.outcome || '').toLowerCase() === 'no' ? 'outcome-no' : '';
       const slugAttr = p.slug ? ` data-slug="${escapeHTML(p.slug)}"` : '';
@@ -1049,6 +1051,7 @@
         <td class="td-title"${slugAttr} title="${escapeHTML(p.title)}">${escapeHTML(p.title)}</td>
         <td class="td-outcome ${outcomeClass}">${escapeHTML(p.outcome)}</td>
         <td class="td-num ${pnlClass(rpnl)}">${formatUSD(rpnl)}</td>
+        <td class="td-num ${pnlClass(rpnl)}">${(rpct >= 0 ? '+' : '') + rpct.toFixed(1) + '%'}</td>
         <td>${formatDate(p.timestamp)}</td>
       </tr>`;
     }).join('');
