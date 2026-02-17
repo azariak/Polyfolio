@@ -320,6 +320,14 @@ body {
 
 .entry-footer a:hover { opacity: 0.75; }
 
+.responsible-warning {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
 /* Divider above footer */
 .entry-divider {
   width: 80px;
@@ -425,6 +433,12 @@ body {
   font-size: 1.3rem;
   color: var(--text-bright);
   letter-spacing: -0.02em;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.top-brand:hover {
+  opacity: 0.75;
 }
 
 .top-sep {

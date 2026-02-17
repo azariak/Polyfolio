@@ -1341,6 +1341,11 @@
     showScreen(entryScreen);
   });
 
+  $('#top-brand-link').addEventListener('click', (e) => {
+    e.preventDefault();
+    backBtn.click();
+  });
+
   /* ---------- URL ROUTING (hash-based) ---------- */
 
   function getAddressFromURL() {
