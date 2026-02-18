@@ -1570,6 +1570,8 @@
     updateRecentDatalist();
   }
 
+  const DEMO_ADDRESS = '0x0c9ebc4b65678b9db62fb0573887f04b00b0bba8';
+
   function updateRecentDatalist() {
     let dl = document.getElementById('recent-addresses');
     if (!dl) {
@@ -1578,7 +1580,9 @@
       document.body.appendChild(dl);
       addressInput.setAttribute('list', 'recent-addresses');
     }
-    dl.innerHTML = getRecentLookups()
+    const recent = getRecentLookups();
+    if (!recent.includes(DEMO_ADDRESS)) recent.push(DEMO_ADDRESS);
+    dl.innerHTML = recent
       .map(a => `<option value="${a.slice(2)}">`)
       .join('');
   }
