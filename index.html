@@ -11,6 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-V9EXE2R6KM"></script>
   <script>
@@ -76,7 +77,13 @@
         <a class="top-address" id="dash-address" target="_blank" rel="noopener"></a>
       </div>
       <div class="top-bar-right">
-        <button id="pdf-btn" class="back-btn" title="Download PDF report">&#8681; PDF</button>
+        <div class="download-wrapper">
+          <button id="download-btn" class="back-btn" title="Download report">&#8681;</button>
+          <div class="download-dropdown" id="download-dropdown">
+            <button class="download-option" id="dl-pdf">&#128196; PDF</button>
+            <button class="download-option" id="dl-excel">&#128202; Excel</button>
+          </div>
+        </div>
         <button id="back-btn" class="back-btn">&larr; New Lookup</button>
         <button id="dash-theme-btn" class="theme-toggle" aria-label="Toggle theme">
           <span class="icon-moon">&#9789;</span>

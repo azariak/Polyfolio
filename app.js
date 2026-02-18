@@ -491,7 +491,162 @@
     doc.save(filename);
   }
 
-  $('#pdf-btn').addEventListener('click', generatePDF);
+  /* ---------- DOWNLOAD DROPDOWN ---------- */
+  const dlBtn = $('#download-btn');
+  const dlDropdown = $('#download-dropdown');
+
+  dlBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    dlDropdown.classList.toggle('visible');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!dlDropdown.contains(e.target) && e.target !== dlBtn) {
+      dlDropdown.classList.remove('visible');
+    }
+  });
+
+  $('#dl-pdf').addEventListener('click', () => {
+    dlDropdown.classList.remove('visible');
+    generatePDF();
+  });
+
+  $('#dl-excel').addEventListener('click', () => {
+    dlDropdown.classList.remove('visible');
+    generateExcel();
+  });
+
+  /* ---------- EXCEL EXPORT ---------- */
+  function generateExcel() {
+    if (!lastData) return;
+    if (!window.XLSX) { alert('Excel library failed to load. Please refresh and try again.'); return; }
+    gtag('event', 'excel_download');
+
+    const wb = XLSX.utils.book_new();
+    const m = computeMetrics(lastData);
+    const addr = dashAddr.textContent || '';
+    const polymarketBase = 'https://polymarket.com/event/';
+
+    /* --- Active Positions Sheet --- */
+    const activeHeader = ['Title', 'Outcome', 'Size', 'Avg Price', 'Cur Price', 'Value', 'PnL', 'PnL %', 'End Date', 'Link'];
+    const activeData = (lastData.positions || []).map(p => [
+      p.title || 'Unknown',
+      p.outcome || '',
+      Number(p.size || 0),
+      Number(p.avgPrice || 0),
+      Number(p.curPrice || 0),
+      Number(p.currentValue || 0),
+      Number(p.cashPnl || 0),
+      Number(p.percentPnl || 0),
+      p.endDate ? formatDate(p.endDate) : '',
+      p.slug ? polymarketBase + p.slug : '',
+    ]);
+
+    const summaryRows = [
+      ['Polyfolio Report — ' + addr],
+      ['Generated', new Date().toLocaleString()],
+      [],
+      ['Portfolio Value', m.totalValue, '', 'Return %', (m.returnPct * 100).toFixed(1) + '%'],
+      ['Realized PnL', m.realizedPnl, '', 'Unrealized PnL', m.unrealizedPnl],
+      ['Win Rate', (m.winRate * 100).toFixed(1) + '%', '', 'Rank', m.rank || '—'],
+      ['Active Positions', m.activeCount, '', 'Closed Positions', m.closedCount],
+      [],
+    ];
+    const activeSheet = XLSX.utils.aoa_to_sheet([...summaryRows, activeHeader, ...activeData]);
+    XLSX.utils.book_append_sheet(wb, activeSheet, 'Active Positions');
+
+    /* --- Closed Positions Sheet --- */
+    const closedHeader = ['Title', 'Outcome', 'Realized PnL', '% Return', 'Closed', 'Link'];
+    const closedData = (lastData.closedPositions || []).map(p => {
+      const rpnl = Number(p.realizedPnl || 0);
+      const costBasis = Number(p.totalBought || 0) * Number(p.avgPrice || 0);
+      const rpct = costBasis > 0 ? (rpnl / costBasis) * 100 : 0;
+      return [
+        p.title || 'Unknown',
+        p.outcome || '',
+        rpnl,
+        Number(rpct.toFixed(1)),
+        formatDate(p.timestamp),
+        p.slug ? polymarketBase + p.slug : '',
+      ];
+    });
+    const closedSheet = XLSX.utils.aoa_to_sheet([closedHeader, ...closedData]);
+    XLSX.utils.book_append_sheet(wb, closedSheet, 'Closed Positions');
+
+    /* --- Winners & Losers Sheet --- */
+    const pnlMap = {};
+    for (const p of (lastData.positions || [])) {
+      const key = p.title || 'Unknown';
+      if (!pnlMap[key]) pnlMap[key] = { title: key, slug: p.slug || '', pnl: 0 };
+      pnlMap[key].pnl += Number(p.cashPnl || 0);
+      if (!pnlMap[key].slug && p.slug) pnlMap[key].slug = p.slug;
+    }
+    for (const p of (lastData.closedPositions || [])) {
+      const key = p.title || 'Unknown';
+      if (!pnlMap[key]) pnlMap[key] = { title: key, slug: p.slug || '', pnl: 0 };
+      pnlMap[key].pnl += Number(p.realizedPnl || 0);
+      if (!pnlMap[key].slug && p.slug) pnlMap[key].slug = p.slug;
+    }
+    const allPnl = Object.values(pnlMap).filter(p => p.pnl !== 0).sort((a, b) => b.pnl - a.pnl);
+    const wlHeader = ['Market', 'Total PnL', 'Link'];
+    const wlData = allPnl.map(p => [
+      p.title,
+      Number(p.pnl.toFixed(2)),
+      p.slug ? polymarketBase + p.slug : '',
+    ]);
+    const wlSheet = XLSX.utils.aoa_to_sheet([wlHeader, ...wlData]);
+    XLSX.utils.book_append_sheet(wb, wlSheet, 'Winners & Losers');
+
+    /* --- Transaction History Sheet --- */
+    const activity = lastData.activity || [];
+    if (activity.length) {
+      const actHeader = ['Date', 'Time', 'Type', 'Side', 'Title', 'Outcome', 'Size', 'Price', 'USDC Value', 'Link'];
+      const actData = activity.map(ev => {
+        const ts = ev.timestamp ? new Date(ev.timestamp * 1000) : null;
+        const type = ev.type || 'TRADE';
+        return [
+          ts ? ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '',
+          ts ? ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '',
+          type.charAt(0) + type.slice(1).toLowerCase().replace('_', ' '),
+          ev.side || '',
+          ev.title || 'Unknown',
+          ev.outcome || '',
+          Number(ev.size || 0),
+          Number(ev.price || 0),
+          Number(ev.usdcSize || 0),
+          (ev.slug || ev.eventSlug) ? polymarketBase + (ev.slug || ev.eventSlug) : '',
+        ];
+      });
+      const actSheet = XLSX.utils.aoa_to_sheet([actHeader, ...actData]);
+      XLSX.utils.book_append_sheet(wb, actSheet, 'Transaction History');
+    }
+
+    /* --- Daily Trade Volume Sheet --- */
+    const trades = lastData.trades || [];
+    if (trades.length) {
+      const dayMap = {};
+      trades.forEach(t => {
+        const d = new Date(t.timestamp || t.createdAt || 0);
+        const key = d.toISOString().slice(0, 10);
+        if (!dayMap[key]) dayMap[key] = 0;
+        dayMap[key] += Math.abs(Number(t.size || 0) * Number(t.price || 0));
+      });
+      const sortedDays = Object.keys(dayMap).sort();
+      const volumes = sortedDays.map(d => dayMap[d]);
+      const ma7 = volumes.map((_, i) => {
+        const w = volumes.slice(Math.max(0, i - 6), i + 1);
+        return Number((w.reduce((s, v) => s + v, 0) / w.length).toFixed(2));
+      });
+
+      const volHeader = ['Date', 'Daily Volume', '7-Day Avg'];
+      const volData = sortedDays.map((d, i) => [d, Number(volumes[i].toFixed(2)), ma7[i]]);
+      const volSheet = XLSX.utils.aoa_to_sheet([volHeader, ...volData]);
+      XLSX.utils.book_append_sheet(wb, volSheet, 'Daily Trade Volume');
+    }
+
+    const filename = 'polyfolio-' + (addr.slice(0, 10) || 'report') + '.xlsx';
+    XLSX.writeFile(wb, filename);
+  }
 
   /* ---------- CHARTS ---------- */
   function destroyCharts() {

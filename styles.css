@@ -480,6 +480,60 @@ body {
   color: var(--accent-text);
 }
 
+/* ---------- DOWNLOAD DROPDOWN ---------- */
+.download-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.download-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-md), 0 8px 24px rgba(0, 0, 0, 0.10);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  overflow: hidden;
+}
+
+.download-dropdown.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.download-option {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 10px 16px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.download-option:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+  color: var(--accent-text);
+}
+
+.download-option + .download-option {
+  border-top: 1px solid var(--border);
+}
+
 /* ---------- METRICS STRIP ---------- */
 .metrics-strip {
   display: grid;
